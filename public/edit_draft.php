@@ -70,9 +70,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
         ];
         $speechify_lang = $lang_map[$video['language']] ?? 'ro-RO';
 
+        // Clean script of any potential HTML or markdown that might break the API
+        $clean_script = strip_tags($new_script);
+        $clean_script = str_replace(['*', '#', '`'], '', $clean_script);
+
         $payload = [
-            "input" => $new_script,
-            "voice_id" => "george", 
+            "input" => $clean_script,
+            "voice_id" => "henry", // Using henry as it is more stable with simba-multilingual
             "language" => $speechify_lang,
             "audio_format" => "mp3",
             "model" => "simba-multilingual"
@@ -94,8 +98,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
         curl_close($ch);
 
         if ($httpCode !== 200) {
-            file_put_contents(__DIR__ . '/../storage/debug_speechify.log', "HTTP $httpCode: " . $response . "\n", FILE_APPEND);
-            throw new Exception("Eroare Speechify API (HTTP $httpCode).");
+            $log_msg = "[" . date('Y-m-d H:i:s') . "] HTTP $httpCode\n";
+            $log_msg .= "Payload: " . json_encode($payload) . "\n";
+            $log_msg .= "Response: " . $response . "\n\n";
+            file_put_contents(__DIR__ . '/../storage/logs/speechify_errors.log', $log_msg, FILE_APPEND);
+            throw new Exception("Eroare Speechify API (HTTP $httpCode). Detalii în log.");
         }
 
         $result = json_decode($response, true);

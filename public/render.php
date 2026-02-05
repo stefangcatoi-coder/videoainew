@@ -125,7 +125,7 @@ $height = ($video_type === 'short') ? 1920 : 1080;
 
         $assHeader = "[Script Info]\nScriptType: v4.00+\nPlayResX: $width\nPlayResY: $height\n\n";
         $assHeader .= "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n";
-        
+
         $fontSize = ($video_type === 'short') ? 72 : 48;
         $assHeader .= "Style: Default,Sans,$fontSize,&H00FFFFFF,$highlightColor,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,5,10,10,10,1\n\n";
         $assHeader .= "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";

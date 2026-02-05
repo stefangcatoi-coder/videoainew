@@ -14,7 +14,7 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../config/speechify.php';
+require_once __DIR__ . '/../config/google_tts.php';
 
 $user_id = $_SESSION['user_id'];
 $video_id = $_GET['id'] ?? 0;
@@ -56,42 +56,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
         $stmt_update = $pdo->prepare("UPDATE videos SET title = ?, script = ?, description = ?, tags = ? WHERE id = ?");
         $stmt_update->execute([$new_title, $new_script, $new_description, $new_tags, $video_id]);
 
-        // 3. Call Speechify API for Voiceover
-        $apiKey = SPEECHIFY_API_KEY;
-        $url = SPEECHIFY_API_URL;
+        // 3. Call Google TTS API for Voiceover
+        $apiKey = GOOGLE_TTS_API_KEY;
+        $url = GOOGLE_TTS_API_URL . "?key=" . $apiKey;
 
         $lang_map = [
-            'ro' => 'ro-RO',
-            'en' => 'en-US',
-            'it' => 'it-IT',
-            'es' => 'es-ES',
-            'fr' => 'fr-FR',
-            'de' => 'de-DE'
+            'ro' => ['code' => 'ro-RO', 'voice' => 'ro-RO-Standard-A'],
+            'en' => ['code' => 'en-US', 'voice' => 'en-US-Standard-A'],
+            'it' => ['code' => 'it-IT', 'voice' => 'it-IT-Standard-A'],
+            'es' => ['code' => 'es-ES', 'voice' => 'es-ES-Standard-A'],
+            'fr' => ['code' => 'fr-FR', 'voice' => 'fr-FR-Standard-A'],
+            'de' => ['code' => 'de-DE', 'voice' => 'de-DE-Standard-A']
         ];
-        $speechify_lang = $lang_map[$video['language']] ?? 'ro-RO';
 
-        // Clean script of any potential HTML or markdown that might break the API
+        $selected_lang = $lang_map[$video['language']] ?? $lang_map['ro'];
+
+        // Clean script of any potential HTML or markdown
         $clean_script = strip_tags($new_script);
         $clean_script = str_replace(['*', '#', '`'], '', $clean_script);
 
         $payload = [
-            "input" => $clean_script,
-            "voice_id" => "henry", // Using henry as it is more stable with simba-multilingual
-            "language" => $speechify_lang,
-            "audio_format" => "mp3",
-            "model" => "simba-multilingual"
+            "input" => ["text" => $clean_script],
+            "voice" => [
+                "languageCode" => $selected_lang['code'],
+                "name" => $selected_lang['voice'],
+                "ssmlGender" => "FEMALE"
+            ],
+            "audioConfig" => [
+                "audioEncoding" => "MP3"
+            ]
         ];
 
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            "Authorization: Bearer $apiKey",
             "Content-Type: application/json"
         ]);
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 120); // Longer timeout for long scripts
+        curl_setopt($ch, CURLOPT_TIMEOUT, 120);
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -101,15 +105,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
             $log_msg = "[" . date('Y-m-d H:i:s') . "] HTTP $httpCode\n";
             $log_msg .= "Payload: " . json_encode($payload) . "\n";
             $log_msg .= "Response: " . $response . "\n\n";
-            file_put_contents(__DIR__ . '/../storage/logs/speechify_errors.log', $log_msg, FILE_APPEND);
-            throw new Exception("Eroare Speechify API (HTTP $httpCode). Detalii în log.");
+            file_put_contents(__DIR__ . '/../storage/logs/google_tts_errors.log', $log_msg, FILE_APPEND);
+            throw new Exception("Eroare Google TTS API (HTTP $httpCode). Detalii în log.");
         }
 
         $result = json_decode($response, true);
-        $audio_base64 = $result['audio_data'] ?? '';
+        $audio_base64 = $result['audioContent'] ?? '';
 
         if (empty($audio_base64)) {
-            throw new Exception("Speechify nu a returnat date audio.");
+            throw new Exception("Google TTS nu a returnat date audio.");
         }
 
         // 4. Save Audio File

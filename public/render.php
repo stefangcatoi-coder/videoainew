@@ -103,10 +103,10 @@ $height = ($video_type === 'short') ? 1920 : 1080;
     exec($whisper_cmd, $w_out, $w_ret);
 
     function formatAssTime($seconds) {
-        $h = floor($seconds / 3600);
-        $m = floor(($seconds / 60) % 60);
-        $s = floor($seconds % 60);
-        $cs = round(($seconds - floor($seconds)) * 100);
+        $h = (int)floor($seconds / 3600);
+        $m = (int)floor($seconds / 60) % 60;
+        $s = (int)floor($seconds) % 60;
+        $cs = (int)round(($seconds - floor($seconds)) * 100);
         if ($cs >= 100) { $cs = 0; $s++; }
         return sprintf("%d:%02d:%02d.%02d", $h, $m, $s, $cs);
     }

@@ -24,7 +24,18 @@ $stmt = $pdo->prepare("SELECT * FROM videos WHERE id = ? AND user_id = ?");
 $stmt->execute([$video_id, $user_id]);
 $video = $stmt->fetch();
 
-if (!$video || $video['status'] !== 'ready_for_render') {
+if (!$video) {
+    header("Location: dashboard.php");
+    exit;
+}
+
+// Dacă video-ul este deja procesat, redirecționăm direct
+if ($video['status'] === 'done') {
+    header("Location: dashboard.php?success=Video-ul este gata!");
+    exit;
+}
+
+if ($video['status'] !== 'ready_for_render') {
     header("Location: dashboard.php");
     exit;
 }
@@ -40,6 +51,7 @@ $height = ($video_type === 'short') ? 1920 : 1080;
 <head>
     <meta charset="UTF-8">
     <title>Producție Video - Video AI</title>
+    <meta http-equiv="refresh" content="300;url=dashboard.php">
     <style>
         body { background-color: #121212; color: #fff; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; flex-direction: column; }
         .loader { border: 5px solid #333; border-top: 5px solid #03dac6; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 20px; }
@@ -208,6 +220,11 @@ $height = ($video_type === 'short') ? 1920 : 1080;
     $stmt = $pdo->prepare("UPDATE videos SET status = 'done', video_path = ? WHERE id = ?");
     $stmt->execute([$relative_video_path, $video_id]);
 
+    // Redirecționare robustă
+    echo "<div style='margin-top: 20px; text-align: center;'>";
+    echo "<p>Video finalizat! Se redirecționează...</p>";
+    echo "<a href='dashboard.php?success=Video-ul finalizat cu succes!' style='color: #03dac6; text-decoration: none; font-weight: bold;'>Click aici dacă nu ești redirecționat automat</a>";
+    echo "</div>";
     echo "<script>window.location.href = 'dashboard.php?success=Video-ul finalizat cu succes!';</script>";
     ?>
 </body>

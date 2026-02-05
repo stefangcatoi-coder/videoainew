@@ -75,49 +75,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
         $clean_script = strip_tags($new_script);
         $clean_script = str_replace(['*', '#', '`'], '', $clean_script);
 
-        $payload = [
-            "input" => ["text" => $clean_script],
-            "voice" => [
-                "languageCode" => $selected_lang['code'],
-                "name" => $selected_lang['voice'],
-                "ssmlGender" => "FEMALE"
-            ],
-            "audioConfig" => [
-                "audioEncoding" => "MP3"
-            ]
-        ];
-
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            "Content-Type: application/json"
-        ]);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 120);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($httpCode !== 200) {
-            $log_msg = "[" . date('Y-m-d H:i:s') . "] HTTP $httpCode\n";
-            $log_msg .= "Payload: " . json_encode($payload) . "\n";
-            $log_msg .= "Response: " . $response . "\n\n";
-            file_put_contents(__DIR__ . '/../storage/logs/google_tts_errors.log', $log_msg, FILE_APPEND);
-            throw new Exception("Eroare Google TTS API (HTTP $httpCode). Detalii în log.");
+        // Google TTS has a 5000 character limit. We split into chunks to support long videos.
+        $words = explode(' ', $clean_script);
+        $chunks = [];
+        $currentChunk = "";
+        foreach ($words as $word) {
+            // Using 4000 to be safe with bytes vs chars
+            if (mb_strlen($currentChunk . " " . $word) < 4000) {
+                $currentChunk .= (empty($currentChunk) ? "" : " ") . $word;
+            } else {
+                $chunks[] = $currentChunk;
+                $currentChunk = $word;
+            }
         }
+        if (!empty($currentChunk)) $chunks[] = $currentChunk;
 
-        $result = json_decode($response, true);
-        $audio_base64 = $result['audioContent'] ?? '';
+        $audio_content = "";
 
-        if (empty($audio_base64)) {
-            throw new Exception("Google TTS nu a returnat date audio.");
+        foreach ($chunks as $idx => $chunk_text) {
+            $payload = [
+                "input" => ["text" => $chunk_text],
+                "voice" => [
+                    "languageCode" => $selected_lang['code'],
+                    "name" => $selected_lang['voice'],
+                    "ssmlGender" => "FEMALE"
+                ],
+                "audioConfig" => [
+                    "audioEncoding" => "MP3"
+                ]
+            ];
+
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($httpCode !== 200) {
+                $log_msg = "[" . date('Y-m-d H:i:s') . "] Chunk $idx Error - HTTP $httpCode\n";
+                $log_msg .= "Payload: " . json_encode($payload) . "\n";
+                $log_msg .= "Response: " . $response . "\n\n";
+                file_put_contents(__DIR__ . '/../storage/logs/google_tts_errors.log', $log_msg, FILE_APPEND);
+                throw new Exception("Eroare Google TTS API la fragmentul $idx (HTTP $httpCode).");
+            }
+
+            $result = json_decode($response, true);
+            $chunk_base64 = $result['audioContent'] ?? '';
+
+            if (empty($chunk_base64)) {
+                throw new Exception("Google TTS nu a returnat date pentru fragmentul $idx.");
+            }
+
+            $audio_content .= base64_decode($chunk_base64);
         }
 
         // 4. Save Audio File
-        $audio_content = base64_decode($audio_base64);
         $filename = "voiceover_" . $video_id . "_" . time() . ".mp3";
         $upload_dir = __DIR__ . "/uploads/audio/";
         if (!is_dir($upload_dir)) mkdir($upload_dir, 0775, true);

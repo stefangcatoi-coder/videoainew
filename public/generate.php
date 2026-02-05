@@ -2,7 +2,7 @@
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-set_time_limit(600); // 10 minutes for API calls and downloads
+set_time_limit(900); // 15 minutes
 
 // /var/www/video-ai/public/generate.php
 
@@ -22,13 +22,13 @@ $user_id = $_SESSION['user_id'];
 $error = '';
 
 // Helper function to get image from Unsplash or Pexels
-function getAutoImage($keyword, $index) {
+function getAutoImage($keyword, $index, $orientation = 'portrait') {
     $localPath = '';
     $foundUrl = '';
 
     // 1. Try Unsplash
     $unsplashKey = trim(UNSPLASH_ACCESS_KEY);
-    $url = "https://api.unsplash.com/search/photos?query=" . urlencode($keyword) . "&orientation=portrait&per_page=1";
+    $url = "https://api.unsplash.com/search/photos?query=" . urlencode($keyword) . "&orientation=$orientation&per_page=1";
 
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -49,7 +49,7 @@ function getAutoImage($keyword, $index) {
     // 2. Fallback to Pexels
     if (!$foundUrl) {
         $pexelsKey = trim(PEXELS_API_KEY);
-        $url = "https://api.pexels.com/v1/search?query=" . urlencode($keyword) . "&orientation=portrait&per_page=1";
+        $url = "https://api.pexels.com/v1/search?query=" . urlencode($keyword) . "&orientation=$orientation&per_page=1";
 
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -87,7 +87,9 @@ function getAutoImage($keyword, $index) {
 
     // 4. Final Fallback (Grey Placeholder)
     if (!$localPath) {
-        $localPath = "https://via.placeholder.com/1080x1920.png/222222/FFFFFF?text=Imagine+Indisponibila";
+        $w = ($orientation === 'portrait') ? 1080 : 1920;
+        $h = ($orientation === 'portrait') ? 1920 : 1080;
+        $localPath = "https://via.placeholder.com/{$w}x{$h}.png/222222/FFFFFF?text=Imagine+Indisponibila";
     }
 
     return $localPath;
@@ -106,33 +108,49 @@ if (!$user) {
 
 $can_generate = ($user['videos_used'] < $user['monthly_limit']);
 
-
 // Processing Form Submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_generate) {
     $idea = trim($_POST['idea'] ?? '');
+    $video_type = $_POST['video_type'] ?? 'short';
+    $language = $_POST['language'] ?? 'ro';
+
+    $lang_names = [
+        'ro' => 'Română',
+        'en' => 'Engleză',
+        'it' => 'Italiană',
+        'es' => 'Spaniolă',
+        'fr' => 'Franceză',
+        'de' => 'Germană'
+    ];
+    $target_lang = $lang_names[$language] ?? 'Română';
 
     if (!empty($idea)) {
         if (strlen($idea) > 500) {
-            $error = "Ideea este prea lungă (maxim 500 caractere).";
+            $error = "Ideea este prea lungă.";
         } else {
             try {
-                // 1. Prepare Prompt for Gemini (SEO Optimized)
-                $prompt = "Generează un plan video profesional și optimizat SEO pentru ideea: \"$idea\".
-                Răspunsul tău TREBUIE să fie un obiect JSON pur, FĂRĂ MARCAJE MARKDOWN (fără ```json), fără nicio altă explicație în plus, strict în limba română (cu excepția image_prompts), cu următoarele câmpuri:
+                $num_images = ($video_type === 'short') ? 3 : 10;
+                $script_length = ($video_type === 'short') ? "50-60 de cuvinte" : "450-600 de cuvinte";
 
-                - title: Un titlu captivant care să includă cuvinte cheie de tip 'Hook' (cârlig) pentru a atrage click-uri.
-                - script: Un text de exact 50-60 de cuvinte, optimizat pentru retenție: începe cu o întrebare intrigantă, oferă informație utilă la mijloc și încheie cu un îndemn clar de abonare.
-                - description: O descriere optimizată SEO care să respecte structura: o introducere captivantă, 3 puncte cheie (bullet points) despre subiect și un Call to Action (CTA) final.
-                - tags: O listă de 15-20 de etichete relevante, separate prin virgulă, incluzând atât cuvinte cheie generale, cât și 'long-tail keywords' specifice.
-                - keywords: Un array cu 3 cuvinte cheie de căutare (Search Keywords) în limba engleză, specifice pentru fiecare scenă (ex: 'modern office skyscraper', 'crypto wallet phone', 'successful businessman smiling').
+                // 1. Prepare Prompt for Gemini
+                $prompt = "Generează un plan video profesional pentru ideea: \"$idea\".
+                Tip video: " . strtoupper($video_type) . " ($script_length).
+                Limba: $target_lang.
+                Răspunsul tău TREBUIE să fie un obiect JSON pur, FĂRĂ MARCAJE MARKDOWN, strict în limba $target_lang (cu excepția keywords), cu următoarele câmpuri:
 
-                Exemplu format cerut (strict JSON):
+                - title: Un titlu captivant.
+                - script: Textul propriu-zis de aproximativ $script_length.
+                - description: O descriere optimizată SEO.
+                - tags: O listă de 15-20 de etichete separate prin virgulă.
+                - keywords: Un array cu EXACT $num_images cuvinte cheie de căutare (Search Keywords) în limba engleză, câte unul pentru fiecare scenă.
+
+                Exemplu format cerut:
                 {
-                  \"title\": \"[HOOK] Titlu Optimizat\",
-                  \"script\": \"Vrei să afli cum...? [Informație]. Abonează-te pentru mai multe!\",
-                  \"description\": \"Intro... \n• Punct 1 \n• Punct 2 \n• Punct 3 \n\n Acționează acum!\",
-                  \"tags\": \"cuvânt1, cuvânt specific, long tail keyword...\",
-                  \"keywords\": [\"keyword 1\", \"keyword 2\", \"keyword 3\"]
+                  \"title\": \"Titlu\",
+                  \"script\": \"Continut...\",
+                  \"description\": \"Descriere...\",
+                  \"tags\": \"tag1, tag2...\",
+                  \"keywords\": [\"keyword 1\", \"keyword 2\", ..., \"keyword $num_images\"]
                 }";
 
                 // 2. Call Gemini API
@@ -147,14 +165,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_generate) {
                 curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
                 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
                 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 60);
 
                 $response = curl_exec($ch);
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 curl_close($ch);
 
                 if ($httpCode !== 200) {
-                    file_put_contents(__DIR__ . '/../storage/debug_api.log', $response);
                     throw new Exception("Eroare API Gemini (HTTP $httpCode).");
                 }
 
@@ -172,28 +189,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_generate) {
                 }
 
                 // 3. Fetch Stock Images
-                $keywords = $aiData['keywords'] ?? [$idea, $idea, $idea];
-                $img1 = getAutoImage($keywords[0] ?? $idea, 1);
-                $img2 = getAutoImage($keywords[1] ?? $idea, 2);
-                $img3 = getAutoImage($keywords[2] ?? $idea, 3);
+                $keywords = $aiData['keywords'] ?? array_fill(0, $num_images, $idea);
+                $orientation = ($video_type === 'short') ? 'portrait' : 'landscape';
+                $images = [];
+                for ($i = 0; $i < $num_images; $i++) {
+                    $images[] = getAutoImage($keywords[$i] ?? $idea, $i + 1, $orientation);
+                }
 
-                // 4. Save to Database (Initial Draft)
+                // 4. Save to Database
                 $pdo->beginTransaction();
 
-                $stmt = $pdo->prepare("INSERT INTO videos (user_id, title, status, script, description, tags, prompt1, prompt2, prompt3, image1, image2, image3) VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([
+                $sql = "INSERT INTO videos (user_id, title, status, script, description, tags, video_type, language";
+                for ($i = 1; $i <= $num_images; $i++) { $sql .= ", prompt$i, image$i"; }
+                $sql .= ") VALUES (?, ?, 'draft', ?, ?, ?, ?, ?";
+                for ($i = 1; $i <= $num_images; $i++) { $sql .= ", ?, ?"; }
+                $sql .= ")";
+
+                $params = [
                     $user_id,
                     $aiData['title'] ?? $idea,
                     $aiData['script'] ?? '',
                     $aiData['description'] ?? '',
                     $aiData['tags'] ?? '',
-                    $keywords[0] ?? '',
-                    $keywords[1] ?? '',
-                    $keywords[2] ?? '',
-                    $img1,
-                    $img2,
-                    $img3
-                ]);
+                    $video_type,
+                    $language
+                ];
+                for ($i = 0; $i < $num_images; $i++) {
+                    $params[] = $keywords[$i] ?? '';
+                    $params[] = $images[$i] ?? '';
+                }
+
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
 
                 $video_id = $pdo->lastInsertId();
                 $pdo->commit();
@@ -225,7 +252,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_generate) {
         .card { background-color: #1e1e1e; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
         .form-group { margin-bottom: 1.5rem; }
         label { display: block; margin-bottom: 0.5rem; font-weight: bold; color: #bb86fc; }
-        input { width: 100%; padding: 0.75rem; border-radius: 4px; border: 1px solid #333; background-color: #2c2c2c; color: #fff; box-sizing: border-box; font-size: 1rem; }
+        input, select { width: 100%; padding: 0.75rem; border-radius: 4px; border: 1px solid #333; background-color: #2c2c2c; color: #fff; box-sizing: border-box; font-size: 1rem; }
         .btn-generate { width: 100%; padding: 1rem; border: none; border-radius: 4px; background-color: #03dac6; color: #121212; font-weight: bold; font-size: 1.1rem; cursor: pointer; transition: background-color 0.3s; }
         .btn-generate:hover { background-color: #01b0a1; }
         .error { color: #cf6679; background-color: rgba(207, 102, 121, 0.1); padding: 1rem; border-radius: 4px; margin-bottom: 1.5rem; text-align: center; }
@@ -249,6 +276,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_generate) {
                             <label for="idea">Ideea Video-ului</label>
                             <input type="text" name="idea" id="idea" placeholder="Ex: Cum să gătești paste" maxlength="500" required>
                         </div>
+                        <div class="form-group">
+                            <label for="video_type">Format Video</label>
+                            <select name="video_type" id="video_type">
+                                <option value="short">Short (Portrait 9:16)</option>
+                                <option value="long">Long (Landscape 16:9, 3-5 min)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="language">Limba</label>
+                            <select name="language" id="language">
+                                <option value="ro">Română</option>
+                                <option value="en">Engleză</option>
+                                <option value="it">Italiană</option>
+                                <option value="es">Spaniolă</option>
+                                <option value="fr">Franceză</option>
+                                <option value="de">Germană</option>
+                            </select>
+                        </div>
                         <button type="submit" class="btn-generate">Generează Plan și Imagini AI</button>
                     </form>
                 </div>
@@ -257,10 +302,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_generate) {
     </div>
     <div id="loading" class="loading-overlay">
         <div class="spinner"></div>
-        <p>Gemini lucrează la planul tău... Te rugăm să aștepți.</p>
+        <p id="loading-text">Gemini lucrează la planul tău... Te rugăm să aștepți.</p>
     </div>
     <script>
         document.getElementById('genForm').addEventListener('submit', function() {
+            const type = document.getElementById('video_type').value;
+            if(type === 'long') {
+                document.getElementById('loading-text').innerText = "Generăm un plan detaliat și 10 imagini HD... Acest proces poate dura 1-2 minute.";
+            }
             document.getElementById('loading').style.display = 'flex';
         });
     </script>

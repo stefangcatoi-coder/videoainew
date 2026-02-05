@@ -129,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_generate) {
             $error = "Ideea este prea lungă.";
         } else {
             try {
-                $num_images = ($video_type === 'short') ? 3 : 10;
+                $num_images = ($video_type === 'short') ? 3 : 5;
                 $script_length = ($video_type === 'short') ? "50-60 de cuvinte" : "450-600 de cuvinte";
 
                 // 1. Prepare Prompt for Gemini
@@ -308,7 +308,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_generate) {
         document.getElementById('genForm').addEventListener('submit', function() {
             const type = document.getElementById('video_type').value;
             if(type === 'long') {
-                document.getElementById('loading-text').innerText = "Generăm un plan detaliat și 10 imagini HD... Acest proces poate dura 1-2 minute.";
+                document.getElementById('loading-text').innerText = "Generăm un plan detaliat și 5 imagini HD... Acest proces poate dura 1-2 minute.";
             }
             document.getElementById('loading').style.display = 'flex';
         });

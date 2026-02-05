@@ -31,7 +31,7 @@ if (!$video || $video['status'] !== 'draft') {
 
 $error = '';
 $video_type = $video['video_type'] ?? 'short';
-$num_images = ($video_type === 'short') ? 3 : 10;
+$num_images = ($video_type === 'short') ? 3 : 5;
 
 // Handle Production Request (Speechify Integration)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
@@ -266,7 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
     const orientation = "<?php echo ($video_type === 'short' ? 'portrait' : 'landscape'); ?>";
 
     const prompts = [
-        <?php for($i=1; $i<=10; $i++) echo '"'.addslashes($video['prompt'.$i] ?? '').'",'; ?>
+        <?php for($i=1; $i<=5; $i++) echo '"'.addslashes($video['prompt'.$i] ?? '').'",'; ?>
     ];
 
     function openStockModal(slot) {

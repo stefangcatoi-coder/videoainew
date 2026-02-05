@@ -30,6 +30,8 @@ if (!$video || $video['status'] !== 'draft') {
 }
 
 $error = '';
+$video_type = $video['video_type'] ?? 'short';
+$num_images = ($video_type === 'short') ? 3 : 10;
 
 // Handle Production Request (Speechify Integration)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
@@ -58,10 +60,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
         $apiKey = SPEECHIFY_API_KEY;
         $url = SPEECHIFY_API_URL;
 
+        $lang_map = [
+            'ro' => 'ro-RO',
+            'en' => 'en-US',
+            'it' => 'it-IT',
+            'es' => 'es-ES',
+            'fr' => 'fr-FR',
+            'de' => 'de-DE'
+        ];
+        $speechify_lang = $lang_map[$video['language']] ?? 'ro-RO';
+
         $payload = [
             "input" => $new_script,
             "voice_id" => "george", 
-            "language" => "ro-RO",
+            "language" => $speechify_lang,
             "audio_format" => "mp3",
             "model" => "simba-multilingual"
         ];
@@ -75,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
         ]);
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 120); // Longer timeout for long scripts
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -144,11 +156,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
         label { display: block; margin-bottom: 0.5rem; color: var(--accent-purple); font-weight: 600; text-transform: uppercase; font-size: 0.8rem; }
         input[type="text"], textarea { width: 100%; padding: 0.8rem; border-radius: 8px; border: 1px solid var(--border-color); background: var(--input-bg); color: #fff; box-sizing: border-box; }
         textarea { min-height: 100px; }
-        .images-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1rem; }
-        .image-card { position: relative; min-height: 150px; background: #222; border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .images-grid { display: grid; grid-template-columns: repeat(<?php echo ($video_type === 'short' ? 3 : 5); ?>, 1fr); gap: 1rem; margin-top: 1rem; }
+        .image-card { position: relative; aspect-ratio: <?php echo ($video_type === 'short' ? '9/16' : '16/9'); ?>; background: #222; border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
         .image-card img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color); }
-        .image-actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; justify-content: center; }
-        .btn-small { padding: 0.4rem 0.8rem; border: none; border-radius: 6px; font-size: 0.7rem; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
+        .image-actions { margin-top: 0.5rem; display: flex; gap: 0.3rem; justify-content: center; flex-wrap: wrap; }
+        .btn-small { padding: 0.3rem 0.5rem; border: none; border-radius: 4px; font-size: 0.6rem; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
         .btn-change { background: var(--accent-purple); color: #121212; }
         .btn-upload { background: var(--accent-turquoise); color: #121212; }
         .btn-produce { width: 100%; padding: 1rem; border: none; border-radius: 12px; background: linear-gradient(90deg, #00b09b, #96c93d); color: #121212; font-weight: 800; cursor: pointer; margin-top: 2rem; }
@@ -163,7 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
         .stock-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; }
         .stock-item { cursor: pointer; border-radius: 8px; overflow: hidden; position: relative; border: 2px solid transparent; transition: border-color 0.2s; }
         .stock-item:hover { border-color: var(--accent-turquoise); }
-        .stock-item img { width: 100%; height: 200px; object-fit: cover; }
+        .stock-item img { width: 100%; height: 150px; object-fit: cover; }
         .stock-item .source { position: absolute; bottom: 5px; right: 5px; background: rgba(0,0,0,0.6); color: #fff; font-size: 0.6rem; padding: 2px 4px; border-radius: 3px; }
 
         .loader-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; flex-direction: column; justify-content: center; align-items: center; }
@@ -173,40 +185,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
 </head>
 <body>
     <?php include __DIR__ . '/../views/header.php'; ?>
-    <div id="loader" class="loader-overlay"><div class="spinner"></div><div style="color:#fff; margin-top:1rem;">Generăm Vocea...</div></div>
+    <div id="loader" class="loader-overlay"><div class="spinner"></div><div style="color:#fff; margin-top:1rem;">Generăm Vocea AI... (Poate dura câteva minute pentru video-uri lungi)</div></div>
     <div class="main-content">
         <div class="container">
-            <h1>Studio Creație Video</h1>
-            <?php if ($error): ?><div style="color:#ff5252;"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+            <h1>Studio Creație Video - <?php echo strtoupper($video_type); ?> (<?php echo strtoupper($video['language']); ?>)</h1>
+            <?php if ($error): ?><div style="color:#ff5252; margin-bottom: 1rem;"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
             <form method="POST" onsubmit="document.getElementById('loader').style.display='flex'">
                 <div class="studio-card">
-                    <div class="form-group"><label>Titlu Video</label><input type="text" name="title" value="<?php echo htmlspecialchars($video['title']); ?>" required></div>
-                    <div class="form-group"><label>Script (Voce AI)</label><textarea name="script" required><?php echo htmlspecialchars($video['script']); ?></textarea></div>
-                    <div class="form-group"><label>Descriere SEO</label><textarea name="description"><?php echo htmlspecialchars($video['description']); ?></textarea></div>
-                    <div class="form-group"><label>Etichete</label><input type="text" name="tags" value="<?php echo htmlspecialchars($video['tags']); ?>"></div>
+                    <div class="form-group"><label>Titlu Video</label><input type="text" name="title" value="<?php echo htmlspecialchars($video['title'] ?? ''); ?>" required></div>
+                    <div class="form-group"><label>Script (Voce AI)</label><textarea name="script" required><?php echo htmlspecialchars($video['script'] ?? ''); ?></textarea></div>
+                    <div class="form-group"><label>Descriere SEO</label><textarea name="description"><?php echo htmlspecialchars($video['description'] ?? ''); ?></textarea></div>
+                    <div class="form-group"><label>Etichete</label><input type="text" name="tags" value="<?php echo htmlspecialchars($video['tags'] ?? ''); ?>"></div>
                     <label>Imagini Selectate (Stock)</label>
                     <div class="images-grid">
+                        <?php for ($i = 1; $i <= $num_images; $i++): ?>
                         <div class="image-container">
-                            <div class="image-card" id="card-1"><img src="<?php echo htmlspecialchars($video['image1']); ?>"></div>
+                            <div class="image-card" id="card-<?php echo $i; ?>"><img src="<?php echo htmlspecialchars($video['image'.$i] ?: 'https://via.placeholder.com/300.png?text=Fara+Imagine'); ?>"></div>
                             <div class="image-actions">
-                                <button type="button" class="btn-small btn-change" onclick="openStockModal(1)">🔄 Schimbă</button>
-                                <button type="button" class="btn-small btn-upload" onclick="triggerUpload(1)">📤 Upload</button>
+                                <button type="button" class="btn-small btn-change" onclick="openStockModal(<?php echo $i; ?>)">🔄 Schimbă</button>
+                                <button type="button" class="btn-small btn-upload" onclick="triggerUpload(<?php echo $i; ?>)">📤 Upload</button>
                             </div>
                         </div>
-                        <div class="image-container">
-                            <div class="image-card" id="card-2"><img src="<?php echo htmlspecialchars($video['image2']); ?>"></div>
-                            <div class="image-actions">
-                                <button type="button" class="btn-small btn-change" onclick="openStockModal(2)">🔄 Schimbă</button>
-                                <button type="button" class="btn-small btn-upload" onclick="triggerUpload(2)">📤 Upload</button>
-                            </div>
-                        </div>
-                        <div class="image-container">
-                            <div class="image-card" id="card-3"><img src="<?php echo htmlspecialchars($video['image3']); ?>"></div>
-                            <div class="image-actions">
-                                <button type="button" class="btn-small btn-change" onclick="openStockModal(3)">🔄 Schimbă</button>
-                                <button type="button" class="btn-small btn-upload" onclick="triggerUpload(3)">📤 Upload</button>
-                            </div>
-                        </div>
+                        <?php endfor; ?>
                     </div>
                     <input type="file" id="fileInput" style="display:none" accept="image/*" onchange="handleFileUpload(event)">
                     <button type="submit" name="produce" id="btnProduce" class="btn-produce">GENEREAZĂ VIDEO FINAL</button>
@@ -234,17 +234,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
     <script>
     let currentSlot = 1;
     const videoId = <?php echo (int)$video_id; ?>;
+    const orientation = "<?php echo ($video_type === 'short' ? 'portrait' : 'landscape'); ?>";
+
+    const prompts = [
+        <?php for($i=1; $i<=10; $i++) echo '"'.addslashes($video['prompt'.$i] ?? '').'",'; ?>
+    ];
 
     function openStockModal(slot) {
         currentSlot = slot;
         document.getElementById('stockModal').style.display = 'flex';
-        // Get keywords from hidden field or prompt
-        const keywords = [
-            "<?php echo addslashes($video['prompt1']); ?>",
-            "<?php echo addslashes($video['prompt2']); ?>",
-            "<?php echo addslashes($video['prompt3']); ?>"
-        ];
-        document.getElementById('stockSearch').value = keywords[slot-1] || '';
+        document.getElementById('stockSearch').value = prompts[slot-1] || '';
         searchStock();
     }
 
@@ -258,7 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
         grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center;">Se încarcă...</div>';
 
         try {
-            const res = await fetch(`fetch_stock_images.php?query=${encodeURIComponent(query)}`);
+            const res = await fetch(`fetch_stock_images.php?query=${encodeURIComponent(query)}&orientation=${orientation}`);
             const data = await res.json();
             if (data.success) {
                 grid.innerHTML = '';

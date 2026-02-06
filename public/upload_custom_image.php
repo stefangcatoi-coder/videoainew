@@ -19,14 +19,8 @@ if (!$video_id || !$index || !$file) {
     exit;
 }
 
-// Fetch video type
-$stmt = $pdo->prepare("SELECT video_type FROM videos WHERE id = ? AND user_id = ?");
-$stmt->execute([$video_id, $_SESSION['user_id']]);
-$video = $stmt->fetch();
-$video_type = $video['video_type'] ?? 'short';
-
-$target_w = ($video_type === 'short') ? 1080 : 1920;
-$target_h = ($video_type === 'short') ? 1920 : 1080;
+$target_w = 1080;
+$target_h = 1920;
 
 // Create image from uploaded file
 $src_img = null;

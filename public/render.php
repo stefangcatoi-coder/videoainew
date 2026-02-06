@@ -5,66 +5,88 @@ error_reporting(E_ALL);
 
 // /var/www/video-ai/public/render.php
 
-session_start();
+if (php_sapi_name() !== 'cli') {
+    session_start();
 
-// Security Middleware
-if (!isset($_SESSION['user_id'])) {
-    header("Location: login.php");
+    // Security Middleware
+    if (!isset($_SESSION['user_id'])) {
+        header("Location: login.php");
+        exit;
+    }
+
+    require_once __DIR__ . '/../config/database.php';
+
+    $user_id = $_SESSION['user_id'];
+    $video_id = $_GET['id'] ?? 0;
+
+    // 1. Fetch video data and verify
+    $stmt = $pdo->prepare("SELECT * FROM videos WHERE id = ? AND user_id = ?");
+    $stmt->execute([$video_id, $user_id]);
+    $video = $stmt->fetch();
+
+    if (!$video) {
+        header("Location: dashboard.php");
+        exit;
+    }
+
+    // Dacă video-ul este deja procesat, redirecționăm direct
+    if ($video['status'] === 'done') {
+        header("Location: dashboard.php?success=Video-ul este gata!");
+        exit;
+    }
+
+    // Dacă este deja în producție, redirecționăm
+    if ($video['status'] === 'pending_production') {
+        header("Location: dashboard.php?success=Video-ul se procesează deja în fundal!");
+        exit;
+    }
+
+    if ($video['status'] !== 'ready_for_render') {
+        header("Location: dashboard.php");
+        exit;
+    }
+
+    // Marcăm ca fiind în producție pentru a evita execuții duble
+    $stmt = $pdo->prepare("UPDATE videos SET status = 'pending_production' WHERE id = ?");
+    $stmt->execute([$video_id]);
+
+    // Salvăm sesiunea și eliberăm lock-ul înainte de procesarea lungă
+    session_write_close();
+
+    // Încercăm să pornim procesul în background folosind CLI
+    $php_binary = PHP_BINARY;
+    $script_path = __FILE__;
+    $command = "$php_binary $script_path $video_id > " . dirname(__DIR__) . "/storage/render_$video_id.log 2>&1 &";
+    exec($command);
+
+    // Redirecționăm utilizatorul imediat către dashboard
+    header("Location: dashboard.php?success=Procesul de generare a început în fundal!");
     exit;
 }
 
+// --- DE AICI ÎNCEPE CODUL PENTRU CLI (BACKGROUND PROCESS) ---
+
+if ($argc < 2) {
+    die("Usage: php render.php <video_id>\n");
+}
+
+$video_id = (int)$argv[1];
+
+// Re-includem baza de date pentru procesul CLI
 require_once __DIR__ . '/../config/database.php';
 
-$user_id = $_SESSION['user_id'];
-$video_id = $_GET['id'] ?? 0;
-
-// 1. Fetch video data and verify
-$stmt = $pdo->prepare("SELECT * FROM videos WHERE id = ? AND user_id = ?");
-$stmt->execute([$video_id, $user_id]);
+// Fetch video data (fără user_id check pentru că e triggered de sistem)
+$stmt = $pdo->prepare("SELECT * FROM videos WHERE id = ?");
+$stmt->execute([$video_id]);
 $video = $stmt->fetch();
 
 if (!$video) {
-    header("Location: dashboard.php");
-    exit;
+    die("Video $video_id not found\n");
 }
 
-// Dacă video-ul este deja procesat, redirecționăm direct
-if ($video['status'] === 'done') {
-    header("Location: dashboard.php?success=Video-ul este gata!");
-    exit;
-}
+// Configurare mediu
+set_time_limit(1800); // 30 minute
 
-// Dacă este deja în producție, redirecționăm
-if ($video['status'] === 'pending_production') {
-    header("Location: dashboard.php?success=Video-ul se procesează deja în fundal!");
-    exit;
-}
-
-if ($video['status'] !== 'ready_for_render') {
-    header("Location: dashboard.php");
-    exit;
-}
-
-// Marcăm ca fiind în producție pentru a evita execuții duble
-$stmt = $pdo->prepare("UPDATE videos SET status = 'pending_production' WHERE id = ?");
-$stmt->execute([$video_id]);
-
-// Configurare proces în fundal
-ignore_user_abort(true);
-set_time_limit(1800); // 30 minute pentru procesare în fundal
-
-// Redirecționăm utilizatorul imediat către dashboard
-ob_start();
-header("Location: dashboard.php?success=Procesul de generare a început! Video-ul va fi gata în câteva minute. Poți vedea progresul în listă.");
-header("Connection: close");
-header("Content-Length: " . ob_get_length());
-ob_end_flush();
-flush();
-if (function_exists('fastcgi_finish_request')) {
-    fastcgi_finish_request();
-}
-
-// De aici încolo codul rulează în fundal
 $video_type = $video['video_type'] ?? 'short';
 $num_images = ($video_type === 'short') ? 3 : 5;
 $width = ($video_type === 'short') ? 1080 : 1920;
@@ -85,8 +107,9 @@ for ($i = 1; $i <= $num_images; $i++) {
 }
 
 if (empty($images) || empty($audio) || !file_exists($audio)) {
-    // Log error in background
     file_put_contents(__DIR__ . '/../storage/debug_render.log', "Error: Media files missing for video $video_id\n", FILE_APPEND);
+    $stmt = $pdo->prepare("UPDATE videos SET status = 'failed' WHERE id = ?");
+    $stmt->execute([$video_id]);
     exit;
 }
 
@@ -168,7 +191,7 @@ if ($w_ret === 0 && file_exists($jsonOutput)) {
 }
 
 // 5. Build Filter Complex
-$zoompan_d = round($img_duration * 25);
+$zoompan_d = (int)round($img_duration * 25);
 $preScale = ($video_type === 'short') ? "scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840" : "scale=3840:2160:force_original_aspect_ratio=increase,crop=3840:2160";
 $zoomLogic = "zoompan=z='min(zoom+0.001,1.3)':d=$zoompan_d:s={$width}x{$height}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':fps=25";
 

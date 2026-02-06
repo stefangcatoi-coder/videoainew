@@ -1,4 +1,5 @@
 <?php
+set_time_limit(0);
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -35,32 +36,25 @@ if (php_sapi_name() !== 'cli') {
         exit;
     }
 
-    // Dacă este deja în producție, redirecționăm
-    if ($video['status'] === 'pending_production') {
-        header("Location: dashboard.php?success=Video-ul se procesează deja în fundal!");
-        exit;
-    }
-
-    if ($video['status'] !== 'ready_for_render') {
-        header("Location: dashboard.php");
-        exit;
-    }
-
-    // Marcăm ca fiind în producție pentru a evita execuții duble
-    $stmt = $pdo->prepare("UPDATE videos SET status = 'pending_production' WHERE id = ?");
-    $stmt->execute([$video_id]);
+    // Notă: Am eliminat verificarea pentru pending_production conform cerințelor pentru a permite re-generarea
 
     // Salvăm sesiunea și eliberăm lock-ul înainte de procesarea lungă
     session_write_close();
 
-    // Încercăm să pornim procesul în background folosind CLI
+    // Încercăm să pornim procesul în background folosind CLI pentru a evita orice timeout de server web
     $php_binary = PHP_BINARY;
     $script_path = __FILE__;
-    $command = "$php_binary $script_path $video_id > " . dirname(__DIR__) . "/storage/render_$video_id.log 2>&1 &";
-    exec($command);
+
+    // Rulăm scriptul în fundal. Comanda conform cerințelor: > /dev/null 2>&1 & și fără 2>&1 în shell_exec
+    $command = "$php_binary $script_path $video_id > /dev/null 2>&1 &";
+    shell_exec($command);
+
+    // Update status în processing
+    $stmt = $pdo->prepare("UPDATE videos SET status = 'processing' WHERE id = ?");
+    $stmt->execute([$video_id]);
 
     // Redirecționăm utilizatorul imediat către dashboard
-    header("Location: dashboard.php?success=Procesul de generare a început în fundal!");
+    header("Location: dashboard.php");
     exit;
 }
 
@@ -75,7 +69,7 @@ $video_id = (int)$argv[1];
 // Re-includem baza de date pentru procesul CLI
 require_once __DIR__ . '/../config/database.php';
 
-// Fetch video data (fără user_id check pentru că e triggered de sistem)
+// Fetch video data
 $stmt = $pdo->prepare("SELECT * FROM videos WHERE id = ?");
 $stmt->execute([$video_id]);
 $video = $stmt->fetch();
@@ -83,9 +77,6 @@ $video = $stmt->fetch();
 if (!$video) {
     die("Video $video_id not found\n");
 }
-
-// Configurare mediu
-set_time_limit(1800); // 30 minute
 
 $video_type = $video['video_type'] ?? 'short';
 $num_images = ($video_type === 'short') ? 3 : 5;
@@ -226,6 +217,7 @@ $ffmpeg_cmd = "ffmpeg -y $inputs -i " . escapeshellarg($audio) . " " .
     "-filter_complex " . escapeshellarg($filter) . " " .
     "-map \"[$lastLabel]\" -map " . count($images) . ":a -c:v libx264 -pix_fmt yuv420p -preset faster -crf 23 -c:a aac -b:a 192k -shortest " . escapeshellarg($output_path);
 
+// Rulăm FFmpeg sincron în acest proces background CLI pentru a captura rezultatul și a updata statusul ulterior.
 $full_output = shell_exec("$ffmpeg_cmd 2>&1");
 file_put_contents(__DIR__ . '/../storage/debug_render.log', "CMD: $ffmpeg_cmd\n\nOUTPUT:\n" . $full_output, FILE_APPEND);
 
@@ -239,7 +231,7 @@ if (file_exists($output_path) && filesize($output_path) > 1000) {
     $stmt = $pdo->prepare("UPDATE videos SET status = 'done', video_path = ? WHERE id = ?");
     $stmt->execute([$relative_video_path, $video_id]);
 } else {
-    // Failure in background
+    // Failure
     $stmt = $pdo->prepare("UPDATE videos SET status = 'failed' WHERE id = ?");
     $stmt->execute([$video_id]);
 }

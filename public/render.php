@@ -6,101 +6,50 @@ error_reporting(E_ALL);
 
 // /var/www/video-ai/public/render.php
 
-if (php_sapi_name() !== 'cli') {
-    session_start();
+session_start();
 
-    // Security Middleware
-    if (!isset($_SESSION['user_id'])) {
-        header("Location: login.php");
-        exit;
-    }
+// Security Middleware
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
+    exit;
+}
 
-    require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/database.php';
 
-    $user_id = $_SESSION['user_id'];
-    $video_id = $_GET['id'] ?? 0;
+$user_id = $_SESSION['user_id'];
+$video_id = $_GET['id'] ?? 0;
 
-    // 1. Fetch video data and verify
-    $stmt = $pdo->prepare("SELECT * FROM videos WHERE id = ? AND user_id = ?");
-    $stmt->execute([$video_id, $user_id]);
-    $video = $stmt->fetch();
+// 1. Fetch video data and verify
+$stmt = $pdo->prepare("SELECT * FROM videos WHERE id = ? AND user_id = ?");
+$stmt->execute([$video_id, $user_id]);
+$video = $stmt->fetch();
 
-    if (!$video) {
-        header("Location: dashboard.php");
-        exit;
-    }
-
-    // Dacă video-ul este deja procesat, redirecționăm direct
-    if ($video['status'] === 'done') {
-        header("Location: dashboard.php?success=Video-ul este gata!");
-        exit;
-    }
-
-    // Notă: Am eliminat verificarea pentru pending_production conform cerințelor pentru a permite re-generarea
-
-    // Salvăm sesiunea și eliberăm lock-ul înainte de procesarea lungă
-    session_write_close();
-
-    // Încercăm să pornim procesul în background folosind CLI pentru a evita orice timeout de server web
-    $php_binary = PHP_BINARY;
-    $script_path = __FILE__;
-
-    // Rulăm scriptul în fundal. Comanda conform cerințelor: > /dev/null 2>&1 & și fără 2>&1 în shell_exec
-    $command = "$php_binary $script_path $video_id > /dev/null 2>&1 &";
-    shell_exec($command);
-
-    // Update status în processing
-    $stmt = $pdo->prepare("UPDATE videos SET status = 'processing' WHERE id = ?");
-    $stmt->execute([$video_id]);
-
-    // Redirecționăm utilizatorul imediat către dashboard
+if (!$video) {
     header("Location: dashboard.php");
     exit;
 }
 
-// --- DE AICI ÎNCEPE CODUL PENTRU CLI (BACKGROUND PROCESS) ---
-
-if ($argc < 2) {
-    die("Usage: php render.php <video_id>\n");
+// Dacă video-ul este deja procesat, redirecționăm direct
+if ($video['status'] === 'done') {
+    header("Location: dashboard.php?success=Video-ul este gata!");
+    exit;
 }
 
-$video_id = (int)$argv[1];
+// --- PREGĂTIRE DATE (Sincron) ---
 
-// Re-includem baza de date pentru procesul CLI
-require_once __DIR__ . '/../config/database.php';
-
-// Fetch video data
-$stmt = $pdo->prepare("SELECT * FROM videos WHERE id = ?");
-$stmt->execute([$video_id]);
-$video = $stmt->fetch();
-
-if (!$video) {
-    die("Video $video_id not found\n");
-}
-
-$video_type = $video['video_type'] ?? 'short';
-$num_images = ($video_type === 'short') ? 3 : 5;
-$width = ($video_type === 'short') ? 1080 : 1920;
-$height = ($video_type === 'short') ? 1920 : 1080;
-
-// 2. Paths
 function getRealFfPath($path) {
     if (empty($path)) return "";
     if (strpos($path, "http") === 0) return $path;
     return __DIR__ . "/" . $path;
 }
 
+$img1 = getRealFfPath($video['image1']);
+$img2 = getRealFfPath($video['image2']);
+$img3 = getRealFfPath($video['image3']);
 $audio = getRealFfPath($video['voiceover_path']);
-$images = [];
-for ($i = 1; $i <= $num_images; $i++) {
-    $img = getRealFfPath($video['image'.$i]);
-    if ($img) $images[] = $img;
-}
 
-if (empty($images) || empty($audio) || !file_exists($audio)) {
-    file_put_contents(__DIR__ . '/../storage/debug_render.log', "Error: Media files missing for video $video_id\n", FILE_APPEND);
-    $stmt = $pdo->prepare("UPDATE videos SET status = 'failed' WHERE id = ?");
-    $stmt->execute([$video_id]);
+if (!file_exists($audio)) {
+    header("Location: dashboard.php?error=Fișier audio lipsă.");
     exit;
 }
 
@@ -109,9 +58,9 @@ $ffprobe_cmd = "ffprobe -v error -show_entries format=duration -of default=nopri
 $audio_duration = (float)shell_exec($ffprobe_cmd);
 if (!$audio_duration || $audio_duration <= 0) $audio_duration = 20.0;
 
-$img_duration = $audio_duration / count($images);
+$img_duration = $audio_duration / 3;
 
-// 4. Word-Level Subtitles with Whisper
+// 4. Word-Level Subtitles with Whisper (Sincron)
 $tempDir = __DIR__ . "/uploads/temp_" . $video_id . "_" . time() . "/";
 if (!is_dir($tempDir)) mkdir($tempDir, 0775, true);
 
@@ -120,13 +69,7 @@ $jsonOutput = $tempDir . $audioBasename . ".json";
 $assFile = $tempDir . "subtitles.ass";
 
 $whisper_bin = "whisper";
-$whisper_lang_map = [
-    'ro' => 'Romanian', 'en' => 'English', 'it' => 'Italian',
-    'es' => 'Spanish', 'fr' => 'French', 'de' => 'German'
-];
-$w_lang = $whisper_lang_map[$video['language']] ?? 'Romanian';
-
-$whisper_cmd = "$whisper_bin " . escapeshellarg($audio) . " --model base --language " . escapeshellarg($w_lang) . " --word_timestamps True --output_format json --output_dir " . escapeshellarg($tempDir) . " 2>&1";
+$whisper_cmd = "$whisper_bin " . escapeshellarg($audio) . " --model base --language Romanian --word_timestamps True --output_format json --output_dir " . escapeshellarg($tempDir) . " 2>&1";
 exec($whisper_cmd, $w_out, $w_ret);
 
 function formatAssTime($seconds) {
@@ -138,40 +81,26 @@ function formatAssTime($seconds) {
     return sprintf("%d:%02d:%02d.%02d", $h, $m, $s, $cs);
 }
 
-function getRandomAssColor() {
-    $r = str_pad(dechex(rand(100, 255)), 2, '0', STR_PAD_LEFT);
-    $g = str_pad(dechex(rand(100, 255)), 2, '0', STR_PAD_LEFT);
-    $b = str_pad(dechex(rand(100, 255)), 2, '0', STR_PAD_LEFT);
-    return "&H00" . strtoupper($b . $g . $r) . "&";
-}
-$highlightColor = getRandomAssColor();
-
 $useAss = false;
 if ($w_ret === 0 && file_exists($jsonOutput)) {
     $data = json_decode(file_get_contents($jsonOutput), true);
     if ($data && isset($data['segments'])) {
-        $assHeader = "[Script Info]\nScriptType: v4.00+\nPlayResX: $width\nPlayResY: $height\n\n";
+        $assHeader = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\n\n";
         $assHeader .= "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n";
-
-        $fontSize = ($video_type === 'short') ? 72 : 48;
-        $assHeader .= "Style: Default,Sans,$fontSize,&H00FFFFFF,$highlightColor,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,5,10,10,10,1\n\n";
+        $assHeader .= "Style: Default,Sans,72,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,5,10,10,10,1\n\n";
         $assHeader .= "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
 
         $events = "";
         foreach ($data['segments'] as $segment) {
             if (!isset($segment['words'])) continue;
-            $words = $segment['words'];
-            foreach ($words as $idx => $wordData) {
+            foreach ($segment['words'] as $idx => $wordData) {
                 $start = formatAssTime($wordData['start']);
                 $end = formatAssTime($wordData['end']);
                 $lineText = "";
-                foreach ($words as $i => $w) {
+                foreach ($segment['words'] as $i => $w) {
                     $cleanWord = trim($w['word']);
-                    if ($i === $idx) {
-                        $lineText .= "{\\1c$highlightColor}" . $cleanWord . "{\\1c&HFFFFFF&} ";
-                    } else {
-                        $lineText .= $cleanWord . " ";
-                    }
+                    if ($i === $idx) { $lineText .= "{\\1c&H00FFFF&}" . $cleanWord . "{\\1c&HFFFFFF&} "; }
+                    else { $lineText .= $cleanWord . " "; }
                 }
                 $events .= "Dialogue: 0,$start,$end,Default,,0,0,0,," . trim($lineText) . "\n";
             }
@@ -183,16 +112,13 @@ if ($w_ret === 0 && file_exists($jsonOutput)) {
 
 // 5. Build Filter Complex
 $zoompan_d = (int)round($img_duration * 25);
-$preScale = ($video_type === 'short') ? "scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840" : "scale=3840:2160:force_original_aspect_ratio=increase,crop=3840:2160";
-$zoomLogic = "zoompan=z='min(zoom+0.001,1.3)':d=$zoompan_d:s={$width}x{$height}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':fps=25";
+$preScale = "scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,setsar=1";
+$zoomLogic = "zoompan=z='min(zoom+0.0015,1.5)':d=$zoompan_d:s=1080x1920:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':fps=25";
 
-$filter = "";
-$concatParts = "";
-foreach ($images as $idx => $img) {
-    $filter .= "[$idx:v]$preScale,setsar=1,$zoomLogic,trim=duration=$img_duration,setpts=PTS-STARTPTS[v$idx]; ";
-    $concatParts .= "[v$idx]";
-}
-$filter .= $concatParts . "concat=n=" . count($images) . ":v=1:a=0[vbase]";
+$filter = "[0:v]$preScale,$zoomLogic,trim=duration=$img_duration,setpts=PTS-STARTPTS[v1]; ";
+$filter .= "[1:v]$preScale,$zoomLogic,trim=duration=$img_duration,setpts=PTS-STARTPTS[v2]; ";
+$filter .= "[2:v]$preScale,$zoomLogic,trim=duration=$img_duration,setpts=PTS-STARTPTS[v3]; ";
+$filter .= "[v1][v2][v3]concat=n=3:v=1:a=0[vbase]";
 
 if ($useAss) {
     $escapedAssPath = str_replace(['\\', ':', "'"], ['\\\\', '\\:', "'\\''"], $assFile);
@@ -208,30 +134,28 @@ $relative_video_path = "uploads/videos/" . $output_filename;
 
 if (!is_dir(__DIR__ . "/uploads/videos/")) mkdir(__DIR__ . "/uploads/videos/", 0775, true);
 
-$inputs = "";
-foreach ($images as $img) {
-    $inputs .= "-loop 1 -t $img_duration -i " . escapeshellarg($img) . " ";
-}
-
-$ffmpeg_cmd = "ffmpeg -y $inputs -i " . escapeshellarg($audio) . " " .
+$ffmpeg_cmd = "ffmpeg -y " .
+    "-loop 1 -t $img_duration -i " . escapeshellarg($img1) . " " .
+    "-loop 1 -t $img_duration -i " . escapeshellarg($img2) . " " .
+    "-loop 1 -t $img_duration -i " . escapeshellarg($img3) . " " .
+    "-i " . escapeshellarg($audio) . " " .
     "-filter_complex " . escapeshellarg($filter) . " " .
-    "-map \"[$lastLabel]\" -map " . count($images) . ":a -c:v libx264 -pix_fmt yuv420p -preset faster -crf 23 -c:a aac -b:a 192k -shortest " . escapeshellarg($output_path);
+    "-map \"[$lastLabel]\" -map 3:a -c:v libx264 -pix_fmt yuv420p -preset faster -crf 23 -c:a aac -b:a 192k -shortest " . escapeshellarg($output_path);
 
-// Rulăm FFmpeg sincron în acest proces background CLI pentru a captura rezultatul și a updata statusul ulterior.
-$full_output = shell_exec("$ffmpeg_cmd 2>&1");
-file_put_contents(__DIR__ . '/../storage/debug_render.log', "CMD: $ffmpeg_cmd\n\nOUTPUT:\n" . $full_output, FILE_APPEND);
+// --- LANSARE BACKGROUND ---
 
-if (file_exists($output_path) && filesize($output_path) > 1000) {
-    // 6. Cleanup
-    foreach ($images as $f) { if (strpos($f, 'http') !== 0 && file_exists($f)) @unlink($f); }
-    if (file_exists($jsonOutput)) @unlink($jsonOutput);
-    if (file_exists($assFile)) @unlink($assFile);
+$db_path = realpath(__DIR__ . '/../storage/app.db');
+$update_cmd = "sqlite3 " . escapeshellarg($db_path) . " \"UPDATE videos SET status='done', video_path=" . escapeshellarg($relative_video_path) . " WHERE id=$video_id;\"";
 
-    // 7. Update Database
-    $stmt = $pdo->prepare("UPDATE videos SET status = 'done', video_path = ? WHERE id = ?");
-    $stmt->execute([$relative_video_path, $video_id]);
-} else {
-    // Failure
-    $stmt = $pdo->prepare("UPDATE videos SET status = 'failed' WHERE id = ?");
-    $stmt->execute([$video_id]);
-}
+// Conform cerinței: > /dev/null 2>&1 & la final și fără 2>&1 în shell_exec
+$full_bg_cmd = "($ffmpeg_cmd && $update_cmd) > /dev/null 2>&1 &";
+
+shell_exec($full_bg_cmd);
+
+// Update status în processing
+$stmt = $pdo->prepare("UPDATE videos SET status = 'processing' WHERE id = ?");
+$stmt->execute([$video_id]);
+
+session_write_close();
+header("Location: dashboard.php");
+exit;

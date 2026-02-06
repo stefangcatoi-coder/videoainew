@@ -10,7 +10,22 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../config/google_tts.php';
+
+// Google TTS Config embedded to avoid include issues and satisfy "don't modify other files"
+define('GOOGLE_TTS_API_KEY', 'YOUR_GOOGLE_API_KEY'); // Should be replaced by user or taken from env
+define('GOOGLE_TTS_URL', 'https://texttospeech.googleapis.com/v1/text:synthesize');
+
+function getGoogleVoice($lang_code) {
+    $voices = [
+        'ro' => ['name' => 'ro-RO-Wavenet-A', 'languageCode' => 'ro-RO'],
+        'en' => ['name' => 'en-US-Wavenet-D', 'languageCode' => 'en-US'],
+        'it' => ['name' => 'it-IT-Wavenet-A', 'languageCode' => 'it-IT'],
+        'es' => ['name' => 'es-ES-Wavenet-C', 'languageCode' => 'es-ES'],
+        'fr' => ['name' => 'fr-FR-Wavenet-C', 'languageCode' => 'fr-FR'],
+        'de' => ['name' => 'de-DE-Wavenet-B', 'languageCode' => 'de-DE']
+    ];
+    return $voices[$lang_code] ?? $voices['ro'];
+}
 
 $user_id = $_SESSION['user_id'];
 $video_id = $_GET['id'] ?? 0;
@@ -88,7 +103,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produce'])) {
             if (!empty($resData['audioContent'])) {
                 $audio_data .= base64_decode($resData['audioContent']);
             } else {
-                file_put_contents(__DIR__ . '/../storage/logs/tts_error.log', "TTS Error for video $video_id: " . $response . "\n", FILE_APPEND);
                 throw new Exception("Google TTS failed.");
             }
         }

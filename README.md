@@ -1,34 +1,26 @@
-# Video AI Platform
+# Video AI - Platformă de Generare Video Automată
 
-Aceasta este o platformă avansată bazată pe PHP pentru generarea de conținut video folosind Inteligența Artificială.
+Această platformă permite utilizatorilor să genereze videoclipuri scurte (Shorts) în mod automat, folosind inteligența artificială pentru script, voce și imagini.
 
-## Caracteristici Principale
+## Funcționalități principale
+- **Generare Script:** Folosește Google Gemini pentru a crea scripturi bazate pe ideile utilizatorului.
+- **Voiceover:** Integrare cu servicii de Text-to-Speech pentru a genera narațiunea.
+- **Imagini AI:** Căutare și selectare de imagini relevante pentru fundal.
+- **Producție Video:** Procesare automată cu FFmpeg, incluzând subtitrări dinamice generate cu Whisper.
 
-*   **Autentificare și Management Utilizatori**: Sistem complet de login și înregistrare.
-*   **Generare Video AI**: Transformă prompt-urile text în scripturi video folosind **Gemini AI**. Suportă acum atât formate scurte (Shorts), cât și videoclipuri lungi (3-5 minute).
-*   **Multilingv**: Suport pentru generare de conținut în Română, Engleză, Italiană, Spaniolă, Franceză și Germană.
-*   **Voiceover Profesional**: Integrare cu **Speechify** pentru a genera voci naturale din textul creat, adaptate automat limbii selectate.
-*   **Management Imagini**: Căutare imagini stock și generare de imagini noi pentru slideshow-uri. Adaptare automată a orientării (Portrait pentru Shorts, Landscape pentru Long).
-*   **Subtitrări Dinamice**: Generare automată de subtitrări cu evidențiere pe cuvânt și culori aleatorii pentru un aspect unic.
-*   **Procesare în Fundal**: Un worker dedicat (`app/worker.php`) care gestionează producția video în mod asincron.
-*   **Limitări și Planuri**: Sistem de monitorizare a utilizării resurselor pe baza planului ales.
+## Părerea Dezvoltatorului
+Platforma este o soluție ingenioasă pentru creatorii de conținut care doresc să scaleze producția de videoclipuri scurte. Arhitectura bazată pe PHP este simplă și eficientă, iar integrarea unor instrumente puternice precum FFmpeg și Whisper direct pe server oferă un control excelent asupra calității finale.
 
-## Tehnologii Utilizate
+Deși este un MVP robust, există potențial de îmbunătățire în zona de procesare asincronă (care a fost recent optimizată pentru a rula în fundal) și în diversificarea șabloanelor vizuale. În stadiul actual, este un instrument foarte util care demonstrează puterea automatizării în procesul creativ.
 
-*   **Backend**: PHP (Custom Architecture)
-*   **Bază de date**: SQLite
-*   **AI (LLM)**: Google Gemini API
-*   **Audio**: Speechify API
-*   **UI**: Design modern, dark-themed, cu CSS personalizat.
+## Instalare și Configurare
+1. Asigură-te că ai PHP 8.1+ instalat.
+2. Instalează dependențele de sistem: `ffmpeg`, `whisper`, `sqlite3`.
+3. Configurează cheile API în directorul `config/`.
+4. Pornește serverul web folosind directorul `public/` ca rădăcină.
 
 ## Structura Proiectului
-
-*   `app/`: Conține logica de procesare în fundal (worker).
-*   `config/`: Fișiere de configurare pentru baze de date și chei API.
-*   `public/`: Punctul de intrare în aplicație și interfața web.
-*   `storage/`: Baza de date SQLite și log-uri.
-*   `views/`: Componente reutilizabile pentru interfață.
-
-## Opinia Dezvoltatorului
-
-Platforma este bine structurată și urmează o logică modulară clară. Separarea configurațiilor de logica de business și de interfața publică este o practică excelentă. Integrarea cu API-uri moderne de AI (Gemini, Speechify) îi oferă un potențial mare de scalare. UI-ul este curat și intuitiv, oferind o experiență de utilizare plăcută.
+- `public/`: Punctele de intrare web și resursele statice.
+- `config/`: Fișiere de configurare pentru baze de date și API-uri.
+- `storage/`: Baza de date SQLite și fișierele temporare/finale.
+- `app/`: Logică de business și worker-i (dacă există).
